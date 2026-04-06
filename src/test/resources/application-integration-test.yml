@@ -1,0 +1,42 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  security:
+    oauth2:
+      client:
+        registration:
+          github:
+            client-id: test-github-id
+            client-secret: test-github-secret
+          google:
+            client-id: test-google-id
+            client-secret: test-google-secret
+
+app:
+  jwt:
+    secret: integration-test-secret-key-long-enough-for-hs256-algorithm-!!!!
+    expiration-days: 7
+  cors:
+    allowed-origins: http://localhost:4200
+  openai:
+    api-key: test-openai-key
+    base-url: https://api.openai.com/v1
+    model: gpt-4o-mini
+  plans:
+    free:
+      max-jobs: 50
+    pro:
+      max-ai-generations-per-month: 30
+
+logging:
+  level:
+    br.com.vagasflow: DEBUG
+    org.springframework.security: WARN

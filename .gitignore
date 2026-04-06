@@ -55,6 +55,9 @@ application-*.yml
 *.pem
 *.key
 *.cert
+# Permite os arquivos de teste (valores são todos fictícios)
+!application-test.yml
+!application-integration-test.yml
 
 # OS-specific
 .DS_Store
