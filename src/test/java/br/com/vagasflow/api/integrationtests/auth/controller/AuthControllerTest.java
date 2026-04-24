@@ -1,6 +1,7 @@
 package br.com.vagasflow.api.integrationtests.auth.controller;
 
 import br.com.vagasflow.api.auth.service.JwtService;
+import br.com.vagasflow.api.auth.service.OAuth2SuccessHandler;
 import br.com.vagasflow.api.integrationtests.support.IntegrationTestBase;
 import br.com.vagasflow.api.user.domain.OAuthProvider;
 import br.com.vagasflow.api.user.domain.UserEntity;
@@ -19,7 +20,7 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DisplayName("AuthController - Integration Test com PostgreSQL + JWT")
+@DisplayName("AuthController - Integration Test com PostgreSQL + Cookie BFF")
 class AuthControllerTest extends IntegrationTestBase {
 
     @Autowired
@@ -52,15 +53,20 @@ class AuthControllerTest extends IntegrationTestBase {
         validToken = jwtService.generateToken(testUser);
     }
 
+    private HttpHeaders headersWithSessionCookie(String token) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.COOKIE, OAuth2SuccessHandler.SESSION_COOKIE_NAME + "=" + token);
+        return headers;
+    }
+
     @Nested
-    @DisplayName("GET /api/v1/auth/me - Requisicao autenticada")
+    @DisplayName("GET /api/v1/auth/me - Requisicao autenticada via cookie")
     class AuthenticatedRequest {
 
         @Test
-        @DisplayName("deve retornar 200 com dados do usuario autenticado via JWT")
+        @DisplayName("deve retornar 200 com dados do usuario autenticado via cookie HttpOnly")
         void shouldReturn200WithAuthenticatedUserData() {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(validToken);
+            HttpHeaders headers = headersWithSessionCookie(validToken);
 
             ResponseEntity<UserResponse> response = restTemplate.exchange(
                     "/api/v1/auth/me",
@@ -81,8 +87,7 @@ class AuthControllerTest extends IntegrationTestBase {
         @Test
         @DisplayName("deve retornar Content-Type application/json")
         void shouldReturnJsonContentType() {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(validToken);
+            HttpHeaders headers = headersWithSessionCookie(validToken);
 
             ResponseEntity<String> response = restTemplate.exchange(
                     "/api/v1/auth/me",
@@ -103,8 +108,7 @@ class AuthControllerTest extends IntegrationTestBase {
             testUser = userRepository.saveAndFlush(testUser);
             String proToken = jwtService.generateToken(testUser);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(proToken);
+            HttpHeaders headers = headersWithSessionCookie(proToken);
 
             ResponseEntity<UserResponse> response = restTemplate.exchange(
                     "/api/v1/auth/me",
@@ -124,8 +128,8 @@ class AuthControllerTest extends IntegrationTestBase {
     class UnauthenticatedRequest {
 
         @Test
-        @DisplayName("deve retornar 401 sem header Authorization")
-        void shouldReturn401WithoutAuthorizationHeader() {
+        @DisplayName("deve retornar 401 sem cookie de sessao")
+        void shouldReturn401WithoutSessionCookie() {
             ResponseEntity<String> response = restTemplate.getForEntity(
                     "/api/v1/auth/me", String.class
             );
@@ -134,10 +138,9 @@ class AuthControllerTest extends IntegrationTestBase {
         }
 
         @Test
-        @DisplayName("deve retornar 401 com token invalido")
-        void shouldReturn401WithInvalidToken() {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth("token.invalido.aqui");
+        @DisplayName("deve retornar 401 com cookie de sessao invalido")
+        void shouldReturn401WithInvalidSessionCookie() {
+            HttpHeaders headers = headersWithSessionCookie("token.invalido.aqui");
 
             ResponseEntity<String> response = restTemplate.exchange(
                     "/api/v1/auth/me",
@@ -150,10 +153,10 @@ class AuthControllerTest extends IntegrationTestBase {
         }
 
         @Test
-        @DisplayName("deve retornar 401 com header Authorization sem prefixo Bearer")
-        void shouldReturn401WithoutBearerPrefix() {
+        @DisplayName("deve retornar 401 com cookie de nome incorreto")
+        void shouldReturn401WithWrongCookieName() {
             HttpHeaders headers = new HttpHeaders();
-            headers.set(HttpHeaders.AUTHORIZATION, "Basic dXNlcjpwYXNz");
+            headers.add(HttpHeaders.COOKIE, "WRONG_COOKIE=" + validToken);
 
             ResponseEntity<String> response = restTemplate.exchange(
                     "/api/v1/auth/me",
@@ -163,6 +166,58 @@ class AuthControllerTest extends IntegrationTestBase {
             );
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        @Test
+        @DisplayName("deve retornar 401 com header Authorization Bearer (nao mais suportado)")
+        void shouldReturn401WithBearerHeader() {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(validToken);
+
+            ResponseEntity<String> response = restTemplate.exchange(
+                    "/api/v1/auth/me",
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class
+            );
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/auth/logout")
+    class LogoutEndpoint {
+
+        @Test
+        @DisplayName("deve retornar 204 e limpar cookie de sessao")
+        void shouldReturn204AndClearSessionCookie() {
+            ResponseEntity<Void> response = restTemplate.exchange(
+                    "/api/v1/auth/logout",
+                    HttpMethod.POST,
+                    HttpEntity.EMPTY,
+                    Void.class
+            );
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+            String setCookie = response.getHeaders().getFirst(HttpHeaders.SET_COOKIE);
+            assertThat(setCookie).isNotNull();
+            assertThat(setCookie).contains(OAuth2SuccessHandler.SESSION_COOKIE_NAME);
+            assertThat(setCookie).contains("Max-Age=0");
+            assertThat(setCookie).contains("HttpOnly");
+        }
+
+        @Test
+        @DisplayName("deve ser acessivel sem autenticacao")
+        void shouldBeAccessibleWithoutAuth() {
+            ResponseEntity<Void> response = restTemplate.exchange(
+                    "/api/v1/auth/logout",
+                    HttpMethod.POST,
+                    HttpEntity.EMPTY,
+                    Void.class
+            );
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         }
     }
 
@@ -182,12 +237,12 @@ class AuthControllerTest extends IntegrationTestBase {
     }
 
     @Nested
-    @DisplayName("Fluxo completo JWT")
-    class FullJwtFlow {
+    @DisplayName("Fluxo completo Cookie BFF")
+    class FullCookieBffFlow {
 
         @Test
-        @DisplayName("deve validar fluxo completo: gerar token -> autenticar -> retornar dados")
-        void shouldValidateFullJwtFlow() {
+        @DisplayName("deve validar fluxo completo: gerar token -> cookie -> autenticar -> retornar dados")
+        void shouldValidateFullCookieBffFlow() {
             UserEntity newUser = new UserEntity();
             newUser.setEmail("full-flow@test.com");
             newUser.setName("Full Flow User");
@@ -205,8 +260,7 @@ class AuthControllerTest extends IntegrationTestBase {
             assertThat(jwtService.extractUserId(token)).isEqualTo(newUser.getId());
             assertThat(jwtService.extractEmail(token)).isEqualTo("full-flow@test.com");
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(token);
+            HttpHeaders headers = headersWithSessionCookie(token);
 
             ResponseEntity<UserResponse> response = restTemplate.exchange(
                     "/api/v1/auth/me",
