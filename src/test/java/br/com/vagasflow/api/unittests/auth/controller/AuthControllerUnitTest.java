@@ -10,6 +10,7 @@ import br.com.vagasflow.api.shared.exception.ApiErrorResponse;
 import br.com.vagasflow.api.user.dto.UserResponse;
 import br.com.vagasflow.api.user.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -20,7 +21,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -34,7 +34,6 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
 import java.util.UUID;
 
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 
@@ -43,7 +42,7 @@ import static org.mockito.BDDMockito.given;
         classes = {SecurityConfig.class, JwtAuthFilter.class}
 ))
 @ActiveProfiles("test")
-@DisplayName("AuthController - GET /api/v1/auth/me")
+@DisplayName("AuthController - Cookie-based BFF Auth")
 public class AuthControllerUnitTest {
 
     @Autowired
@@ -71,7 +70,10 @@ public class AuthControllerUnitTest {
                     .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                     .formLogin(AbstractHttpConfigurer::disable)
                     .httpBasic(AbstractHttpConfigurer::disable)
-                    .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                    .authorizeHttpRequests(auth -> auth
+                            .requestMatchers("/api/v1/auth/logout").permitAll()
+                            .anyRequest().authenticated()
+                    )
                     .exceptionHandling(ex -> ex
                             .authenticationEntryPoint((req, res, authEx) -> {
                                 res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -89,15 +91,13 @@ public class AuthControllerUnitTest {
         }
     }
 
-    // Cenário 1 - Requisição autenticada retorna dados do usuário
-
     @Nested
-    @DisplayName("Requisição autenticada")
+    @DisplayName("GET /api/v1/auth/me - Requisicao autenticada")
     class AuthenticatedRequest {
 
         @Test
         @WithMockUser(username = "550e8400-e29b-41d4-a716-446655440000")
-        @DisplayName("deve retornar 200 com dados completos do usuário autenticado")
+        @DisplayName("deve retornar 200 com dados completos do usuario autenticado")
         void shouldReturn200WithUserData() {
             var userId = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
             var expectedResponse = new UserResponse(
@@ -138,34 +138,44 @@ public class AuthControllerUnitTest {
         }
     }
 
-    // Cenário 2 - Requisição sem autenticação rejeitada com 401
-
     @Nested
-    @DisplayName("Requisição sem autenticação")
+    @DisplayName("GET /api/v1/auth/me - Requisicao sem autenticacao")
     class UnauthenticatedRequest {
 
         @Test
-        @DisplayName("deve retornar 401 quando não há cabeçalho Authorization")
-        void shouldReturn401WhenNoAuthorizationHeader() {
+        @DisplayName("deve retornar 401 quando nao ha cookie de sessao")
+        void shouldReturn401WhenNoSessionCookie() {
             assertThat(mvcTester.get().uri("/api/v1/auth/me"))
                     .hasStatus(HttpStatus.UNAUTHORIZED);
         }
 
         @Test
-        @DisplayName("deve retornar 401 com Bearer token de formato inválido")
-        void shouldReturn401WithMalformedBearerToken() {
+        @DisplayName("deve retornar 401 com cookie de nome incorreto")
+        void shouldReturn401WithWrongCookieName() {
             assertThat(mvcTester.get().uri("/api/v1/auth/me")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer token.invalido.aqui"))
-                    .hasStatus(HttpStatus.UNAUTHORIZED);
-        }
-
-        @Test
-        @DisplayName("deve retornar 401 com cabeçalho Authorization sem prefixo Bearer")
-        void shouldReturn401WithoutBearerPrefix() {
-            assertThat(mvcTester.get().uri("/api/v1/auth/me")
-                    .header(HttpHeaders.AUTHORIZATION, "Basic dXNlcjpwYXNz"))
+                    .cookie(new Cookie("WRONG_COOKIE", "some.jwt.token")))
                     .hasStatus(HttpStatus.UNAUTHORIZED);
         }
     }
 
+    @Nested
+    @DisplayName("POST /api/v1/auth/logout")
+    class LogoutEndpoint {
+
+        @Test
+        @DisplayName("deve retornar 204 e cookie de sessao com maxAge=0")
+        void shouldReturn204AndClearSessionCookie() {
+            assertThat(mvcTester.post().uri("/api/v1/auth/logout"))
+                    .hasStatus(HttpStatus.NO_CONTENT)
+                    .cookies()
+                    .containsKey(OAuth2SuccessHandler.SESSION_COOKIE_NAME);
+        }
+
+        @Test
+        @DisplayName("deve ser acessivel sem autenticacao")
+        void shouldBeAccessibleWithoutAuth() {
+            assertThat(mvcTester.post().uri("/api/v1/auth/logout"))
+                    .hasStatus(HttpStatus.NO_CONTENT);
+        }
+    }
 }
