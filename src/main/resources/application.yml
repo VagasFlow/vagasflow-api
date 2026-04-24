@@ -79,6 +79,8 @@ app:
     expiration-days: ${JWT_EXPIRATION}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  cookie:
+    secure: ${COOKIE_SECURE:true}
   oauth2:
     authorized-redirect-uris: ${OAUTH2_AUTHORIZED_REDIRECT_URIS}
   openai:
