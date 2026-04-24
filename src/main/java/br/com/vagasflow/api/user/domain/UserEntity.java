@@ -12,7 +12,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "users")
+@Table(name = "users", uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"provider", "provider_id"})
+})
 @Getter
 @Setter
 @AllArgsConstructor
@@ -36,7 +38,7 @@ public class UserEntity {
     @Column(nullable = false)
     private OAuthProvider provider;
 
-    @Column(unique = true, name = "provider_id", nullable = false)
+    @Column(name = "provider_id", nullable = false)
     private String providerId;
 
     @Enumerated(EnumType.STRING)
